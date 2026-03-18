@@ -15,7 +15,7 @@
       },
       "consumerKey": {
         "type": "string",
-        "description": "Your Composio consumer key (ck_...) from dashboard.composio.dev/settings"
+        "description": "Your Composio consumer key (ck_...) from dashboard.composio.dev/~/org/connect/clients/openclaw"
       },
       "mcpUrl": {
         "type": "string",
@@ -30,7 +30,7 @@
     },
     "consumerKey": {
       "label": "Consumer Key",
-      "help": "Your Composio consumer key (ck_...) from dashboard.composio.dev/settings",
+      "help": "Your Composio consumer key (ck_...) from dashboard.composio.dev/~/org/connect/clients/openclaw",
       "sensitive": true
     },
     "mcpUrl": {

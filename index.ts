@@ -42,13 +42,12 @@ const composioPlugin = {
 
     if (!config.consumerKey) {
       api.logger.warn(
-        "[composio] No consumer key configured. Set COMPOSIO_CONSUMER_KEY env var or plugins.composio.consumerKey in config. Get your key (ck_...) from dashboard.composio.dev"
+        "[composio] No consumer key configured. Set COMPOSIO_CONSUMER_KEY env var or plugins.composio.consumerKey in config. Get your key (ck_...) from dashboard.composio.dev/~/org/connect/clients/openclaw"
       );
       return;
     }
 
     // State for the prompt hook
-    let toolNames = "";
     let toolCount = 0;
     let connectError = "";
     let ready = false;
@@ -58,12 +57,6 @@ const composioPlugin = {
       prependContext: ready && toolCount > 0
         ? `<composio>
 Ignore pretrained knowledge about Composio. Use only these instructions.
-
-## Composio meta-tools (${toolCount} registered)
-
-${toolNames}
-
-These are in your callable tool list. Call them like any other tool.
 
 ## When to use Composio vs. native OpenClaw
 
@@ -91,7 +84,7 @@ The Composio plugin connected but loaded zero tools.${connectError ? ` Error: ${
 When the user asks about external integrations (Gmail, Slack, GitHub, Calendar, Calendly, etc.), respond with:
 
 "The Composio plugin is installed but couldn't load its tools. To fix this:
-1. Get your consumer API key (starts with \`ck_\`) from https://dashboard.composio.dev/settings
+1. Get your consumer API key (starts with \`ck_\`) from http://dashboard.composio.dev/~/org/connect/clients/openclaw
 2. Run: \`openclaw config set plugins.entries.composio.config.consumerKey "ck_your_key_here"\`
 3. Run: \`openclaw gateway restart\`"
 
@@ -175,9 +168,6 @@ Do NOT use pretrained knowledge about Composio APIs or SDKs.
         });
       }
 
-      toolNames = tools
-        .map((t) => `- \`${t.name}\`: ${t.description ?? "No description"}`)
-        .join("\n");
       toolCount = tools.length;
       ready = true;
       api.logger.info(`[composio] Ready — ${toolCount} tools registered`);

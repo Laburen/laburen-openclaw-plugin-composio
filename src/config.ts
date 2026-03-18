@@ -38,7 +38,7 @@ export const composioPluginConfigSchema = {
     },
     consumerKey: {
       label: "Consumer Key",
-      help: "Your Composio consumer key (ck_...) from dashboard.composio.dev/settings",
+      help: "Your Composio consumer key (ck_...) from dashboard.composio.dev/~/org/connect/clients/openclaw",
       sensitive: true,
     },
     mcpUrl: {

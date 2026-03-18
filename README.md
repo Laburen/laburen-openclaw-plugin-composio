@@ -10,7 +10,7 @@ openclaw plugins install @composio/openclaw-plugin
 
 ## Setup
 
-1. Log in at [dashboard.composio.dev](https://dashboard.composio.dev)
+1. Log in at [dashboard.composio.dev](http://dashboard.composio.dev/~/org/connect/clients/openclaw)
 2. Choose your preferred client (OpenClaw, Claude Code, Cursor, etc.)
 3. Copy your consumer key (`ck_...`)
 
@@ -36,7 +36,7 @@ openclaw gateway restart
 
 The plugin connects to Composio's MCP server at `https://connect.composio.dev/mcp` and registers all available tools directly into the OpenClaw agent. Tools are called by name — no extra search or execute steps needed.
 
-If a tool returns an auth error, the agent will prompt you to connect that toolkit at [dashboard.composio.dev](https://dashboard.composio.dev).
+If a tool returns an auth error, the agent will prompt you to connect that toolkit at [dashboard.composio.dev](http://dashboard.composio.dev/~/org/connect/clients/openclaw).
 
 ## Configuration
 
@@ -64,5 +64,5 @@ If a tool returns an auth error, the agent will prompt you to connect that toolk
 ## Links
 
 - [Composio Documentation](https://docs.composio.dev)
-- [Composio Dashboard](https://dashboard.composio.dev)
+- [Composio Dashboard](http://dashboard.composio.dev/~/org/connect/)
 - [MCP Protocol](https://modelcontextprotocol.io)
