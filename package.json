@@ -3,19 +3,6 @@
   "version": "0.0.9",
   "type": "module",
   "description": "OpenClaw Composio plugin - access 1000+ third-party tools via Composio Tool Router",
-  "keywords": [
-    "openclaw",
-    "composio",
-    "tool-router",
-    "agents",
-    "mcp",
-    "plugin"
-  ],
-  "homepage": "https://github.com/ComposioHQ/openclaw-composio-plugin",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/ComposioHQ/openclaw-composio-plugin.git"
-  },
   "license": "MIT",
   "files": [
     "index.ts",
