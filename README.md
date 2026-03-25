@@ -32,7 +32,7 @@ openclaw config set plugins.entries.composio.enabled true
 openclaw config set plugins.entries.composio.config.enabled true
 openclaw config set plugins.entries.composio.config.consumerKey "ck_..."
 openclaw config set plugins.entries.composio.config.composioApiKey "ak_..."
-openclaw config set plugins.entries.composio.config.userId "your-stable-user-id"
+openclaw config set plugins.entries.composio.config.userId "user-id"
 ```
 
 Restart the gateway after changes:
