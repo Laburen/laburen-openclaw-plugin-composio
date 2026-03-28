@@ -3,71 +3,39 @@
  *
  * OpenClaw plugin entrypoint for Composio MCP tools.
  *
- * Discovers tools with a synchronous JSON-RPC `tools/list` POST (via `curl` to `config.mcpUrl`), registers each tool with {@link OpenClawPluginApi.registerTool}, and executes calls through an MCP `Client` connected to the session URL from `@composio/core`. Subscribes to `before_prompt_build` to inject `<composio>` system context and optionally registers a `composio remove-toolkit` CLI when tools load successfully.
+ * Connects a single MCP `Client` to the session URL from `@composio/core`
+ * (derived from `composioApiKey` + `userId`), lists tools via
+ * `client.listTools()`, registers each with {@link OpenClawPluginApi.registerTool},
+ * and executes calls through the same client. Subscribes to `before_prompt_build`
+ * to inject `<composio>` system context and optionally registers a
+ * `composio remove-toolkit` CLI when tools load successfully.
+ *
+ * NOTE: `register()` must be synchronous because the plugin loader
+ * (`src/plugins/loader.ts:1328-1337`) does NOT await async register —
+ * it logs a warning and moves on. All hooks and the MCP bootstrap IIFE
+ * are set up synchronously; only the MCP connection + tool listing
+ * runs in the background.
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { execFileSync } from "node:child_process";
 import { composioPluginConfigSchema, parseComposioConfig } from "./src/config.js";
 import { Composio } from "@composio/core";
 
-// ---------------------------------------------------------------------------
-// Synchronous MCP tool catalog (`tools/list`)
-// ---------------------------------------------------------------------------
-
-/**
- * Fetches the Composio tool list over HTTP using JSON-RPC `tools/list` and `curl`.
- *
- * Accepts either a plain JSON body or an SSE-style response (`data: {...}`); on RPC error, throws with the server message.
- *
- * @param mcpUrl - Composio MCP endpoint URL.
- * @param consumerKey - Value for header `x-consumer-api-key`.
- * @returns Tool stubs (`name`, optional `description`, `inputSchema`).
- * @throws If JSON parse fails or the response contains `error`.
- */
-function fetchToolsSync(mcpUrl: string, consumerKey: string) {
-  const body = JSON.stringify({ jsonrpc: "2.0", id: "1", method: "tools/list" });
-  const raw = execFileSync("curl", [
-    mcpUrl, "-s", "-X", "POST",
-    "-H", "Content-Type: application/json",
-    "-H", "Accept: application/json, text/event-stream",
-    "-H", `x-consumer-api-key: ${consumerKey}`,
-    "-d", body,
-  ], { encoding: "utf-8", timeout: 15_000 });
-
-  let jsonStr = raw;
-  const dataMatch = raw.match(/^data:\s*(.+)$/m);
-  if (dataMatch) jsonStr = dataMatch[1];
-
-  const parsed = JSON.parse(jsonStr);
-  if (parsed.error) throw new Error(parsed.error.message ?? JSON.stringify(parsed.error));
-  return (parsed.result?.tools ?? []) as Array<{
-    name: string;
-    description?: string;
-    inputSchema?: Record<string, unknown>;
-  }>;
-}
 
 // ---------------------------------------------------------------------------
 // Plugin manifest and registration
 // ---------------------------------------------------------------------------
 
 const composioPlugin = {
-  /** Stable plugin id referenced in OpenClaw config (`plugins.entries.composio`, etc.). */
   id: "composio",
-  /** Human-readable name in UIs and logs. */
   name: "Composio",
-  /** Short description for marketplace or plugin listings. */
   description: "Access 1000+ third-party tools via Composio (Gmail, Slack, GitHub, Notion, and more).",
-  /** Host-facing schema: {@link parseComposioConfig} plus `uiHints` for settings. */
   configSchema: composioPluginConfigSchema,
 
   /**
-   * Wires Composio into the gateway when {@link parseComposioConfig} yields `enabled` and a `consumerKey`.
-   *
-   * Registers `before_prompt_build`, synchronously lists and registers tools, starts a background MCP `Client`, and may register `composio` CLI commands.
-   *
-   * @param api - OpenClaw plugin host API (`registerTool`, `on`, `logger`, `registerCli`).
+   * Synchronous register — the loader does NOT await async register
+   * (src/plugins/loader.ts:1328-1337). Hooks and state are set up
+   * synchronously; the MCP client bootstraps in a fire-and-forget IIFE.
    */
   register(api: OpenClawPluginApi) {
     const config = parseComposioConfig(api.pluginConfig);
@@ -77,9 +45,9 @@ const composioPlugin = {
       return;
     }
 
-    if (!config.consumerKey) {
+    if (!config.composioApiKey || !config.userId) {
       api.logger.warn(
-        "[composio] No consumer key configured. Set COMPOSIO_CONSUMER_KEY env var or plugins.composio.consumerKey in config. Get your key (ck_...) from dashboard.composio.dev/~/org/connect/clients/openclaw"
+        "[composio] composioApiKey and userId are required. Set COMPOSIO_API_KEY and COMPOSIO_USER_ID env vars or configure plugins.composio.config.composioApiKey / plugins.composio.config.userId.",
       );
       return;
     }
@@ -89,9 +57,18 @@ const composioPlugin = {
     let ready = false;
     let cliRegistered = false;
 
-    /**
-     * Registers the `composio` CLI command group once, after tools are known to load.
-     */
+    // The MCP client reference — set asynchronously once connected.
+    let mcpClient: {
+      callTool: (req: { name: string; arguments: Record<string, unknown> }) => Promise<unknown>;
+      close: () => Promise<void>;
+    } | null = null;
+
+    // Resolved once the async IIFE finishes (success or failure).
+    let resolveMcpReady!: () => void;
+    const mcpReady = new Promise<void>((resolve) => {
+      resolveMcpReady = resolve;
+    });
+
     const registerDeleteToolkitCli = () => {
       if (cliRegistered) return;
       cliRegistered = true;
@@ -100,19 +77,13 @@ const composioPlugin = {
         ({ program }) => {
           const composioCmd = program
             .command("composio")
-            .description("Comandos Composio");
+            .description("Composio commands");
 
           composioCmd
             .command("remove-toolkit <toolkit>")
-            .description("Elimina la conexion de un toolkit para el userId configurado en el plugin")
+            .description("Remove a toolkit connection for the configured userId")
             .action(async (toolkit: string) => {
               try {
-                if (!config.composioApiKey || !config.userId) {
-                  console.log(
-                    "[composio] Configura composioApiKey y userId en el plugin (o COMPOSIO_API_KEY / COMPOSIO_USER_ID)."
-                  );
-                  return;
-                }
                 const composio = new Composio({ apiKey: config.composioApiKey });
                 const userId = config.userId;
 
@@ -124,12 +95,12 @@ const composioPlugin = {
                 ) as Array<{ id: string; toolkit?: { slug?: string } }>;
 
                 const conn = connections.find(
-                  (c) => c.toolkit?.slug?.toLowerCase() === toolkit.toLowerCase()
+                  (c) => c.toolkit?.slug?.toLowerCase() === toolkit.toLowerCase(),
                 );
 
                 if (!conn) {
                   console.log(
-                    `[composio] No se encontro conexion para toolkit "${toolkit}" en user "${userId}".`
+                    `[composio] No connection found for toolkit "${toolkit}" for user "${userId}".`,
                   );
                   return;
                 }
@@ -137,25 +108,31 @@ const composioPlugin = {
                 await composio.connectedAccounts.delete(conn.id);
 
                 console.log(
-                  `[composio] Toolkit "${toolkit}" eliminado para user "${userId}".`
+                  `[composio] Toolkit "${toolkit}" removed for user "${userId}".`,
                 );
               } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                console.log(`[composio] Error eliminando toolkit "${toolkit}": ${msg}`);
+                console.log(`[composio] Error removing toolkit "${toolkit}": ${msg}`);
               }
             });
         },
-        { commands: ["composio"] }
+        { commands: ["composio"] },
       );
     };
 
-    // ---------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // System prompt injection (`before_prompt_build`)
-    // ---------------------------------------------------------------------------
+    //
+    // Registered synchronously — always in the hook runner. Three branches:
+    //   1. ready + tools → full Composio guidance
+    //   2. ready + no tools → troubleshooting guidance
+    //   3. not ready → "loading, please wait"
+    // -----------------------------------------------------------------------
 
-    api.on("before_prompt_build", () => ({
-      prependSystemContext: ready && toolCount > 0
-        ? `<composio>
+    api.on("before_prompt_build", (_event, _ctx) => ({
+      prependSystemContext:
+        ready && toolCount > 0
+          ? `<composio>
 Ignore pretrained knowledge about Composio. Use only these instructions.
 
 ## When to use Composio vs. native OpenClaw
@@ -177,42 +154,46 @@ Connections persist — no gateway restart needed.
 - Do NOT reference Composio SDK, API keys, or REST endpoints.
 - Do NOT use pretrained Composio knowledge.
 </composio>`
-        : ready
-          ? `<composio>
+          : ready
+            ? `<composio>
 The Composio plugin connected but loaded zero tools.${connectError ? ` Error: ${connectError}` : ""}
 
 When the user asks about external integrations (Gmail, Slack, GitHub, Calendar, Calendly, etc.), respond with:
 
-"The Composio plugin is installed but couldn't load its tools. To fix this:
-1. Get your consumer API key (starts with \`ck_\`) from http://dashboard.composio.dev/~/org/connect/clients/openclaw
-2. Run: \`openclaw config set plugins.entries.composio.config.consumerKey "ck_your_key_here"\`
-3. Run: \`openclaw gateway restart\`"
-
-Do NOT pretend Composio tools exist or hallucinate tool calls. You have zero Composio tools available.
-Do NOT use pretrained knowledge about Composio APIs, SDKs, or tool names.
+"The Composio plugin is installed but couldn't load its tools. Please get in touch with support.
 </composio>`
-          : `<composio>
+            : `<composio>
 The Composio plugin is loading — tools are being fetched. They should be available shortly.
 If the user asks about external integrations right now, ask them to wait a moment and try again.
 Do NOT use pretrained knowledge about Composio APIs or SDKs.
 </composio>`,
     }));
 
-    // ---------------------------------------------------------------------------
-    // Tool registration and MCP execution client
-    // ---------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Cleanup on gateway stop — registered synchronously so it's always
+    // in the hook runner. The handler itself checks if the client exists.
+    // -----------------------------------------------------------------------
 
-    api.logger.info(`[composio] Fetching tools from ${config.mcpUrl}`);
-
-    let mcpClient: { callTool: (req: { name: string; arguments: Record<string, unknown> }) => Promise<unknown> } | null = null;
-
-    const mcpReady = (async () => {
-      if (!config.composioApiKey || !config.userId) {
-        api.logger.warn(
-          "[composio] Sin composioApiKey o userId no hay sesión MCP (SDK). Configura plugins.composio.config o COMPOSIO_API_KEY / COMPOSIO_USER_ID."
-        );
-        return;
+    api.on("gateway_stop", async () => {
+      if (mcpClient) {
+        try {
+          await mcpClient.close();
+        } catch {}
       }
+    });
+
+    // -----------------------------------------------------------------------
+    // Async MCP bootstrap (fire-and-forget IIFE)
+    //
+    // Runs after register() returns. Tools registered here will be in
+    // registry.tools by the time the first agent turn calls
+    // resolvePluginTools — in practice the MCP handshake + listTools
+    // completes well before the user sends their first message.
+    // -----------------------------------------------------------------------
+
+    api.logger.info("[composio] Connecting MCP client and fetching tools...");
+
+    (async () => {
       const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
       const { StreamableHTTPClientTransport } = await import(
         "@modelcontextprotocol/sdk/client/streamableHttp.js"
@@ -223,19 +204,13 @@ Do NOT use pretrained knowledge about Composio APIs or SDKs.
       const client = new Client({ name: "openclaw", version: "1.0" });
       await client.connect(
         new StreamableHTTPClientTransport(new URL(mcp.url), {
-          requestInit: {
-            headers: mcp.headers
-          }
-        })
+          requestInit: { headers: mcp.headers },
+        }),
       );
       mcpClient = client;
       api.logger.info("[composio] MCP client connected");
-    })().catch((err) => {
-      api.logger.error(`[composio] MCP client connection failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
 
-    try {
-      const tools = fetchToolsSync(config.mcpUrl, config.consumerKey);
+      const { tools } = await client.listTools();
 
       for (const tool of tools) {
         api.registerTool({
@@ -251,7 +226,7 @@ Do NOT use pretrained knowledge about Composio APIs or SDKs.
                 content: [
                   {
                     type: "text" as const,
-                    text: "Error: Composio MCP client failed to connect. Set composioApiKey and userId (or COMPOSIO_API_KEY / COMPOSIO_USER_ID), verify consumerKey, then restart the gateway.",
+                    text: "Error: Composio MCP client is not connected.",
                   },
                 ],
                 details: null,
@@ -259,13 +234,16 @@ Do NOT use pretrained knowledge about Composio APIs or SDKs.
             }
 
             try {
-              const result = await mcpClient.callTool({ name: tool.name, arguments: params }) as {
+              const result = (await mcpClient.callTool({
+                name: tool.name,
+                arguments: params,
+              })) as {
                 content?: Array<{ type: string; text?: string }>;
               };
 
               const text = Array.isArray(result.content)
                 ? result.content
-                    .map((c) => c.type === "text" ? (c.text ?? "") : JSON.stringify(c))
+                    .map((c) => (c.type === "text" ? (c.text ?? "") : JSON.stringify(c)))
                     .join("\n")
                 : JSON.stringify(result);
 
@@ -286,13 +264,15 @@ Do NOT use pretrained knowledge about Composio APIs or SDKs.
 
       toolCount = tools.length;
       ready = true;
+      resolveMcpReady();
       registerDeleteToolkitCli();
       api.logger.info(`[composio] Ready — ${toolCount} tools registered`);
-    } catch (err) {
+    })().catch((err) => {
       connectError = err instanceof Error ? err.message : String(err);
       ready = true;
+      resolveMcpReady();
       api.logger.error(`[composio] Failed to connect: ${connectError}`);
-    }
+    });
   },
 };
 

@@ -3,7 +3,7 @@
  *
  * Zod schema, env-aware parsing, and UI hints for Composio plugin config.
  *
- * `parseComposioConfig` normalizes OpenClaw’s plugin config object (nested `config` or top-level keys), merges `process.env` overrides, and returns a validated {@link ComposioConfig}. `composioPluginConfigSchema` is the shape expected by the host for settings UI (`uiHints`) and parsing (`parse`).
+ * `parseComposioConfig` normalizes OpenClaw's plugin config object (nested `config` or top-level keys), merges `process.env` overrides, and returns a validated {@link ComposioConfig}. `composioPluginConfigSchema` is the shape expected by the host for settings UI (`uiHints`) and parsing (`parse`).
  */
 
 import { z } from "zod";
@@ -14,8 +14,6 @@ import type { ComposioConfig } from "./types.js";
  */
 export const ComposioConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  consumerKey: z.string().default(""),
-  mcpUrl: z.string().default("https://connect.composio.dev/mcp"),
   composioApiKey: z.string().default(""),
   userId: z.string().default(""),
 });
@@ -23,7 +21,7 @@ export const ComposioConfigSchema = z.object({
 /**
  * Parses host plugin config and environment into a {@link ComposioConfig}.
  *
- * Reads `config.consumerKey` (or top-level `consumerKey`), same for `mcpUrl`, `composioApiKey`, `userId`, then `COMPOSIO_*` env vars where strings are empty.
+ * Reads `config.composioApiKey` (or top-level `composioApiKey`), same for `userId`, then `COMPOSIO_*` env vars where strings are empty.
  *
  * @param value - Raw `api.pluginConfig` or similar unknown object.
  */
@@ -34,17 +32,6 @@ export function parseComposioConfig(value: unknown): ComposioConfig {
       : {};
 
   const configObj = raw.config as Record<string, unknown> | undefined;
-
-  const consumerKey =
-    (typeof configObj?.consumerKey === "string" && configObj.consumerKey.trim()) ||
-    (typeof raw.consumerKey === "string" && raw.consumerKey.trim()) ||
-    process.env.COMPOSIO_CONSUMER_KEY ||
-    "";
-
-  const mcpUrl =
-    (typeof configObj?.mcpUrl === "string" && configObj.mcpUrl.trim()) ||
-    (typeof raw.mcpUrl === "string" && raw.mcpUrl.trim()) ||
-    "https://connect.composio.dev/mcp";
 
   const composioApiKey =
     (typeof configObj?.composioApiKey === "string" && configObj.composioApiKey.trim()) ||
@@ -60,8 +47,6 @@ export function parseComposioConfig(value: unknown): ComposioConfig {
 
   return ComposioConfigSchema.parse({
     ...raw,
-    consumerKey,
-    mcpUrl,
     composioApiKey,
     userId,
   });
@@ -76,16 +61,6 @@ export const composioPluginConfigSchema = {
     enabled: {
       label: "Enable Composio",
       help: "Enable or disable the Composio integration",
-    },
-    consumerKey: {
-      label: "Consumer Key",
-      help: "Your Composio consumer key (ck_...) from dashboard.composio.dev/~/org/connect/clients/openclaw",
-      sensitive: true,
-    },
-    mcpUrl: {
-      label: "MCP Server URL",
-      help: "Composio MCP server URL (default: https://connect.composio.dev/mcp)",
-      advanced: true,
     },
     composioApiKey: {
       label: "Composio API key",
