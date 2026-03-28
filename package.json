@@ -1,13 +1,12 @@
 {
   "name": "@laburen/openclaw-plugin-composio",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "type": "module",
   "description": "OpenClaw Composio plugin - access 1000+ third-party tools via Composio Tool Router",
   "license": "MIT",
   "files": [
     "index.ts",
     "src",
-    "skills",
     "openclaw.plugin.json",
     "README.md"
   ],

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.0
+
+### Breaking
+
+- **Config/schema:** `consumerKey`, `mcpUrl`, and `COMPOSIO_CONSUMER_KEY` are removed from `openclaw.plugin.json`, `src/config.ts`, and `src/types.ts`. The plugin requires `composioApiKey` and `userId` (or `COMPOSIO_API_KEY` / `COMPOSIO_USER_ID`) before registering tools or hooks; without both it logs a warning and exits early.
+- **Packaging:** `openclaw.plugin.json` no longer declares `skills`, and the `skills/` directory is removed from published `files` in `package.json`. The bundled `composio` and `composio-mcp` skill markdown files are deleted.
+
+### Changes
+
+- **Core/MCP:** One MCP `Client` connects to the session URL from `@composio/core` (`composioApiKey` + `userId`); tool catalog comes from `client.listTools()` on that client instead of a synchronous `curl` JSON-RPC `tools/list` POST to `mcpUrl` with `x-consumer-api-key`.
+- **Lifecycle:** Subscribes to `gateway_stop` and closes the MCP client when the gateway stops.
+- **Prompt/hooks:** `before_prompt_build` distinguishes loading, zero tools after connect, and ready states; zero-tool troubleshooting text no longer points users at consumer-key setup.
+- **CLI:** `composio` command descriptions and `remove-toolkit` user-facing messages are in English; redundant `composioApiKey` / `userId` checks in `remove-toolkit` are removed because the plugin already requires them at startup.
+- **Docs/README:** README describes API key + `userId` only, `tools.alsoAllow`, drops `curl` / consumer key prerequisites, and updates the options table and “How it works” to match MCP-only discovery.
+
 ## 0.0.11
 
 ### Changes
