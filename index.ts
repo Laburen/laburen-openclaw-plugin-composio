@@ -56,6 +56,8 @@ const composioPlugin = {
     let connectError = "";
     let ready = false;
     let cliRegistered = false;
+    const maxConnectAttempts = 2;
+    const retryDelayMs = 3000;
 
     // The MCP client reference — set asynchronously once connected.
     let mcpClient: {
@@ -68,6 +70,18 @@ const composioPlugin = {
     const mcpReady = new Promise<void>((resolve) => {
       resolveMcpReady = resolve;
     });
+    let mcpReadyResolved = false;
+
+    const settleMcpReady = () => {
+      if (mcpReadyResolved) return;
+      mcpReadyResolved = true;
+      resolveMcpReady();
+    };
+
+    const wait = (ms: number) =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, ms);
+      });
 
     const registerDeleteToolkitCli = () => {
       if (cliRegistered) return;
@@ -194,84 +208,105 @@ Do NOT use pretrained knowledge about Composio APIs or SDKs.
     api.logger.info("[composio] Connecting MCP client and fetching tools...");
 
     (async () => {
-      const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-      const { StreamableHTTPClientTransport } = await import(
-        "@modelcontextprotocol/sdk/client/streamableHttp.js"
-      );
-      const composio = new Composio({ apiKey: config.composioApiKey });
-      const session = await composio.create(config.userId);
-      const { mcp } = session;
-      const client = new Client({ name: "openclaw", version: "1.0" });
-      await client.connect(
-        new StreamableHTTPClientTransport(new URL(mcp.url), {
-          requestInit: { headers: mcp.headers },
-        }),
-      );
-      mcpClient = client;
-      api.logger.info("[composio] MCP client connected");
+      for (let attempt = 1; attempt <= maxConnectAttempts; attempt++) {
+        try {
+          if (attempt > 1) {
+            api.logger.warn(
+              `[composio] Retrying MCP bootstrap (${attempt}/${maxConnectAttempts})...`,
+            );
+          }
 
-      const { tools } = await client.listTools();
+          const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+          const { StreamableHTTPClientTransport } = await import(
+            "@modelcontextprotocol/sdk/client/streamableHttp.js"
+          );
+          const composio = new Composio({ apiKey: config.composioApiKey });
+          const session = await composio.create(config.userId);
+          const { mcp } = session;
+          const client = new Client({ name: "openclaw", version: "1.0" });
+          await client.connect(
+            new StreamableHTTPClientTransport(new URL(mcp.url), {
+              requestInit: { headers: mcp.headers },
+            }),
+          );
+          mcpClient = client;
+          api.logger.info("[composio] MCP client connected");
 
-      for (const tool of tools) {
-        api.registerTool({
-          name: tool.name,
-          label: tool.name,
-          description: tool.description ?? "",
-          parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
+          const { tools } = await client.listTools();
 
-          async execute(_toolCallId: string, params: Record<string, unknown>) {
-            await mcpReady;
-            if (!mcpClient) {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: "Error: Composio MCP client is not connected.",
-                  },
-                ],
-                details: null,
-              };
-            }
+          for (const tool of tools) {
+            api.registerTool({
+              name: tool.name,
+              label: tool.name,
+              description: tool.description ?? "",
+              parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
 
-            try {
-              const result = (await mcpClient.callTool({
-                name: tool.name,
-                arguments: params,
-              })) as {
-                content?: Array<{ type: string; text?: string }>;
-              };
+              async execute(_toolCallId: string, params: Record<string, unknown>) {
+                await mcpReady;
+                if (!mcpClient) {
+                  return {
+                    content: [
+                      {
+                        type: "text" as const,
+                        text: "Error: Composio MCP client is not connected.",
+                      },
+                    ],
+                    details: null,
+                  };
+                }
 
-              const text = Array.isArray(result.content)
-                ? result.content
-                    .map((c) => (c.type === "text" ? (c.text ?? "") : JSON.stringify(c)))
-                    .join("\n")
-                : JSON.stringify(result);
+                try {
+                  const result = (await mcpClient.callTool({
+                    name: tool.name,
+                    arguments: params,
+                  })) as {
+                    content?: Array<{ type: string; text?: string }>;
+                  };
 
-              return {
-                content: [{ type: "text" as const, text }],
-                details: null,
-              };
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              return {
-                content: [{ type: "text" as const, text: `Error calling ${tool.name}: ${msg}` }],
-                details: null,
-              };
-            }
-          },
-        });
+                  const text = Array.isArray(result.content)
+                    ? result.content
+                        .map((c) => (c.type === "text" ? (c.text ?? "") : JSON.stringify(c)))
+                        .join("\n")
+                    : JSON.stringify(result);
+
+                  return {
+                    content: [{ type: "text" as const, text }],
+                    details: null,
+                  };
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  return {
+                    content: [{ type: "text" as const, text: `Error calling ${tool.name}: ${msg}` }],
+                    details: null,
+                  };
+                }
+              },
+            });
+          }
+
+          toolCount = tools.length;
+          ready = true;
+          settleMcpReady();
+          api.logger.info(`[composio] Ready — ${toolCount} tools registered`);
+          return;
+        } catch (err) {
+          connectError = err instanceof Error ? err.message : String(err);
+          api.logger.error(
+            `[composio] Failed to connect (attempt ${attempt}/${maxConnectAttempts}): ${connectError}`,
+          );
+
+          if (attempt < maxConnectAttempts) {
+            await wait(retryDelayMs);
+          }
+        }
       }
 
-      toolCount = tools.length;
       ready = true;
-      resolveMcpReady();
-      api.logger.info(`[composio] Ready — ${toolCount} tools registered`);
-    })().catch((err) => {
-      connectError = err instanceof Error ? err.message : String(err);
-      ready = true;
-      resolveMcpReady();
-      api.logger.error(`[composio] Failed to connect: ${connectError}`);
-    });
+      settleMcpReady();
+      api.logger.error(
+        `[composio] MCP bootstrap exhausted after ${maxConnectAttempts} attempts. Last error: ${connectError}`,
+      );
+    })();
   },
 };
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.14
+
+### Changes
+
+- **Core/MCP:** Adds a retry loop for MCP bootstrap in `index.ts` (2 attempts with a 3-second delay), improves connect-attempt logging, and ensures `mcpReady` resolves exactly once so tool execution never hangs when initial connection fails.
+
 ## 0.0.13
 
 ### Changes
