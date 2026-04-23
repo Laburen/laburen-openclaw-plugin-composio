@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.13
+
+### Changes
+
+- **CLI/gateway:** Registers the `composio` CLI command synchronously during plugin `register()` (before the async MCP bootstrap), fixing late command registration where it could be missing from the gateway right after startup.
+
 ## 0.1.0
 
 ### Breaking

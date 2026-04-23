@@ -119,7 +119,7 @@ const composioPlugin = {
         { commands: ["composio"] },
       );
     };
-
+    registerDeleteToolkitCli();
     // -----------------------------------------------------------------------
     // System prompt injection (`before_prompt_build`)
     //
@@ -265,7 +265,6 @@ Do NOT use pretrained knowledge about Composio APIs or SDKs.
       toolCount = tools.length;
       ready = true;
       resolveMcpReady();
-      registerDeleteToolkitCli();
       api.logger.info(`[composio] Ready — ${toolCount} tools registered`);
     })().catch((err) => {
       connectError = err instanceof Error ? err.message : String(err);
